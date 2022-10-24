@@ -49,35 +49,21 @@
 
 AHT10 humiditySensor; 
 
-//
-// For normal use, we require that you edit the sketch to replace FILLMEIN
-// with values assigned by the TTN console. However, for regression tests,
-// we want to be able to compile these scripts. The regression tests define
-// COMPILE_REGRESSION_TEST, and in that case we define FILLMEIN to a non-
-// working but innocuous value.
-//
-#ifdef COMPILE_REGRESSION_TEST
-# define FILLMEIN 0
-#else
-# warning "You must replace the values marked FILLMEIN with real values from the TTN control panel!"
-# define FILLMEIN (#dont edit this, edit the lines that use FILLMEIN)
-#endif
-
 // This EUI must be in little-endian format, so least-significant-byte
 // first. When copying an EUI from ttnctl output, this means to reverse
 // the bytes. For TTN issued EUIs the last bytes should be 0xD5, 0xB3,
 // 0x70.
-static const u1_t PROGMEM APPEUI[8]={  };
+static const u1_t PROGMEM APPEUI[8]={ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
 
 // This should also be in little endian format, see above.
-static const u1_t PROGMEM DEVEUI[8]={  };
+static const u1_t PROGMEM DEVEUI[8]={ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
 
 // This key should be in big endian format (or, since it is not really a
 // number but a block of memory, endianness does not really apply). In
 // practice, a key taken from ttnctl can be copied as-is.
-static const u1_t PROGMEM APPKEY[16] = {  };
+static const u1_t PROGMEM APPKEY[16] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
 
 // payload to send to TTN gateway
@@ -85,11 +71,17 @@ static osjob_t sendjob;
 
 // Schedule TX every this many seconds (might become longer due to duty
 // cycle limitations).
-const unsigned TX_INTERVAL = 15; //1200;
+const unsigned TX_INTERVAL = 600; //1200;
 
 // sensors pin mapping
 int sensorPin = A2;         // select the input pin for the potentiometer
 int sensorPowerCtrlPin = 5; // select control pin for switching VCC (sensors)
+
+//pin set
+#define VOLTAGE_PIN A3
+#define PWM_OUT_PIN 9
+//#define SENSOR_POWER_PIN 5
+//#define ADC_PIN A2
 
 // RFM95 pin mapping
 const lmic_pinmap lmic_pins = {
@@ -187,7 +179,8 @@ void onEvent (ev_t ev) {
             Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
             if (LMIC.txrxFlags & TXRX_ACK)
               Serial.println(F("Received ack"));
-            if (LMIC.dataLen) {
+            if (LMIC.dataLen) 
+            {
               Serial.print(F("Received "));
               Serial.print(LMIC.dataLen);
               Serial.println(F(" bytes of payload"));
@@ -195,14 +188,17 @@ void onEvent (ev_t ev) {
             // Schedule next transmission
             //os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
 
-        
-        // Use library from https://github.com/rocketscream/Low-Power
-        for (int i=0; i<int(TX_INTERVAL/8); i++) {
-           // low power sleep mode
-           LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-           }
-        do_send(&sendjob);
-            break;
+            // Use library from https://github.com/rocketscream/Low-Power
+            for (int i=0; i<int(TX_INTERVAL/8); i++) 
+            {
+              // low power sleep mode
+              LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+              //LowPower.idle(SLEEP_8S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_OFF, SPI_OFF, USART0_OFF, TWI_OFF);
+              Serial.print(F("Wake\n "));
+            }
+            
+            do_send(&sendjob);
+                break;
         case EV_LOST_TSYNC:
             Serial.println(F("EV_LOST_TSYNC"));
             break;
@@ -247,73 +243,92 @@ void onEvent (ev_t ev) {
     }
 }
 
+void all_pins_low()
+{
+    pinMode(PWM_OUT_PIN, INPUT);
+    pinMode(A4, INPUT_PULLUP);
+    pinMode(A5, INPUT_PULLUP);
+
+    delay(1);
+}
+
+
+
 void do_send(osjob_t* j){
 
-float   temperature=0.0;        //temperature
-float   humidity=0.0;           //humidity
-int     soilmoisturepercent=0;  //spoil moisture humidity
-uint8_t payload[8];             //payload for TX
-int     AirValue = 828;         //capacitive sensor in the value (maximum value)
-int     WaterValue = 496;       //capacitive sensor in water value (minimum value)
-int     sensorValue = 0;        //capacitive sensor
-int     x = 0;
-
+    float   temperature=0.0;        //temperature
+    float   humidity=0.0;           //humidity
+    int     soilmoisturepercent=0;  //spoil moisture humidity
+    uint8_t payload[10];             //payload for TX
+    int     AirValue = 828;         //capacitive sensor in the value (maximum value)
+    int     WaterValue = 496;       //capacitive sensor in water value (minimum value)
+    int     sensorValue = 0;        //capacitive sensor
+    int     x = 0;
 
     // Check if there is not a current TX/RX job running
-    if (LMIC.opmode & OP_TXRXPEND) {
+    if (LMIC.opmode & OP_TXRXPEND) 
+    {
         Serial.println(F("OP_TXRXPEND, not sending"));
-    } else {
+    } 
+    else 
+    {
+        // analogReference(INTERNAL);
+        // read capacitive sensor value
+        //sensorPowerOn();//
+
+        //delay(200);
+  
+        // measure voltage by band gap voltage
+        unsigned int getVDD = 0;
+
+        // set the reference to Vcc and the measurement to the internal 1.1V reference
+        while (((getVDD == 0)&&(x<=10)) ||  isnan(getVDD)){
+        x++;
+        ADMUX = (1<<REFS0) | (1<<MUX3) | (1<<MUX2) | (1<<MUX1);
+        delay(50);                        // Wait for Vref to settle
+        ADCSRA |= (1<<ADSC);              // Start conversion
+        while (bit_is_set(ADCSRA,ADSC));  // wait until done
+        getVDD = ADC;                     // Vcc in millivolts
+        // mcu dependend calibration
+    }
+    getVDD = 1122475UL / (unsigned long)getVDD; //1126400 = 1.1*1024*1000
+    
+    //sensorPowerOff();
+    //delay(100);
+
+    // set up Timer 1
+    pinMode(PWM_OUT_PIN, OUTPUT);
+    TCCR1A = bit(COM1A0);            // toggle OC1A on Compare Match
+    TCCR1B = bit(WGM12) | bit(CS10); // CTC, scale to clock
+    OCR1A = 1;
 
 
-    // read capacitive sensor value
-    sensorPowerOn();//
-    delay(100);
-    sensorValue = analogRead(sensorPin);
-    delay(200);
-  
 
-  
-  // measure voltage by band gap voltage
-  unsigned int getVDD = 0;
+    sensorPowerOn();
+    delay(50);
 
-  
-  // set the reference to Vcc and the measurement to the internal 1.1V reference
-  while (((getVDD == 0)&&(x<=10)) ||  isnan(getVDD)){
-  x++;
-  ADMUX = (1<<REFS0) | (1<<MUX3) | (1<<MUX2) | (1<<MUX1);
-  delay(50);                        // Wait for Vref to settle
-  ADCSRA |= (1<<ADSC);              // Start conversion
-  while (bit_is_set(ADCSRA,ADSC));  // wait until done
-  getVDD = ADC;                     // Vcc in millivolts
-  // mcu dependend calibration
-  }
-  getVDD = 1122475UL / (unsigned long)getVDD; //1126400 = 1.1*1024*1000
-  
-     sensorPowerOff();
-     delay(100);
-     sensorPowerOn();
-     delay(300);
+    //delay(300);
 
     // Get the new temperature and humidity value
-       while ((humiditySensor.available() == false) && (x<10))
+    while ((humiditySensor.available() == false) && (x<10))
+    {
+        x++;
+        delay(50);
+    }
 
-       {
-              x++;
-              delay(300);
-       }
+    temperature = humiditySensor.getTemperature();
+    humidity = humiditySensor.getHumidity();
 
-     temperature = humiditySensor.getTemperature();
-     humidity = humiditySensor.getHumidity();
-
-   if (humidity == 0) Serial.println(F("Failed to read from AHT sensor (zero values)!"));
+    if (humidity == 0) Serial.println(F("Failed read AHT sensor (zero values)!"));
 
     // Check if any reads failed and exit early (to try again).
     if (isnan(humidity) || isnan(temperature)) {
-    Serial.println(F("Failed to read from AHT sensor (value NaN)!"));
+    Serial.println(F("Failed read AHT sensor (value NaN)!"));
 	      temperature=0.0;       
 	      humidity=0.0;         
     }
 
+    sensorValue = analogRead(sensorPin);
     soilmoisturepercent = map(sensorValue, AirValue, WaterValue, 0, 100);
     if(soilmoisturepercent >= 100)
     {
@@ -328,18 +343,22 @@ int     x = 0;
     sensorPowerOff();
 
     //Print the results
-    Serial.print(F("Temperature: "));
+    Serial.print(F("Temp: "));
     Serial.print(temperature, 2);
     Serial.print(F(" C\t"));
-    Serial.print(F("Humidity: "));
+    Serial.print(F("Humidity"));
     Serial.print(humidity, 2);
     Serial.println(F("% RH\t"));
     
-    Serial.print(F("Voltage: "));
+    Serial.print(F("Voltage"));
     Serial.print(getVDD);
     Serial.println(F("mV \t"));
   
-    Serial.print(F("Moisture ADC : "));
+    Serial.print(F("Moisture ADC"));
+    Serial.print(sensorValue);
+    Serial.println(F("ADC \t"));
+
+    Serial.print(F("Moisture Percent"));
     Serial.print(soilmoisturepercent);
     Serial.println(F("% \t"));
 
@@ -364,7 +383,7 @@ int     x = 0;
        
    // used range for mapping type float to int:  -1...+1, -> value/100
     uint16_t payloadHumid = 0;
-    if(humidity !=0) payloadHumid = LMIC_f2sflt16(humidity/100);
+    if(humidity !=0) payloadHumid = LMIC_f2uflt16(humidity/100);
     // int -> bytes
     byte humidLow = lowByte(payloadHumid);
     byte humidHigh = highByte(payloadHumid);
@@ -377,16 +396,33 @@ int     x = 0;
     payload[6] = battLow;
     payload[7] = battHigh;
 
+
+    // prepare payload for TX
+    byte adcLow = lowByte(sensorValue);
+    byte adcHigh = highByte(sensorValue);
+    // place the bytes into the payload
+    payload[8] = adcLow;
+    payload[9] = adcHigh;    
+
+
     // Prepare upstream data transmission at the next possible time.
     LMIC_setTxData2(1, payload, sizeof(payload), 0);
     Serial.println(F("Packet queued"));
     }
     // Next TX is scheduled after TX_COMPLETE event.
+
+    all_pins_low();
 }
 
 void setup() {
     Serial.begin(9600);
-    Serial.println(F("Starting"));
+    Serial.println(F("Start"));
+
+    // set up Timer 1
+    pinMode(PWM_OUT_PIN, OUTPUT);
+    TCCR1A = bit(COM1A0);            // toggle OC1A on Compare Match
+    TCCR1B = bit(WGM12) | bit(CS10); // CTC, scale to clock
+    OCR1A = 1;
 
     // set control pin for VCC as Output
     pinMode(sensorPowerCtrlPin, OUTPUT);
@@ -398,11 +434,11 @@ void setup() {
     //Check if the AHT10 will acknowledge
     if (humiditySensor.begin() == false)
     {
-      Serial.println(F("AHT10 not detected. Please check wiring. Freezing."));
+      Serial.println(F("AHT10 not detected"));
     //while (1);
     }
   else
-    Serial.println(F("AHT10 acknowledged."));
+    Serial.println(F("AHT10 ack"));
     
     // LMIC init
     os_init();
